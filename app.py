@@ -82,7 +82,16 @@ ANSWER:"""
 def call_ollama(prompt: str) -> str:
     response = requests.post(
         OLLAMA_URL,
-        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+        json={
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "keep_alive": "30m",       # keep model loaded in RAM between requests
+            "options": {
+                "num_ctx": 2048,       # smaller context window = faster, less RAM
+                "num_predict": 200,    # cap response length so it can't ramble on
+            },
+        },
         timeout=120,
     )
     response.raise_for_status()
