@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 
-const API_URL = 'http://localhost:8000/chat'
+const API_URL = 'https://chatbot-production-d986.up.railway.app/'
 
 const STARTER_PROMPTS = [
   'Does TCS deliver on holidays?',
