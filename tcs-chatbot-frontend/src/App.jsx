@@ -5,7 +5,7 @@ const API_URL = 'http://localhost:8000/chat'
 const STARTER_PROMPTS = [
   'Does TCS deliver on holidays?',
   'How long do I have to file a claim?',
-  "What's the head office address?",
+  "What's TCS's head office address?",
 ]
 
 function Message({ role, text, sources, refused }) {

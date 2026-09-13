@@ -1,21 +1,28 @@
 """
-Phase 7: FastAPI backend for the TCS RAG chatbot.
+Phase 7 (updated): FastAPI backend for the TCS RAG chatbot.
+Now uses Groq's hosted API to run an open-source Llama model,
+instead of a locally-running Ollama instance — makes public
+deployment possible without needing to rent a GPU/RAM-heavy server.
 
 Run: uvicorn app:app --reload --port 8000
 Then test at: http://localhost:8000/docs  (interactive Swagger UI)
 """
 
+import os
+
 import chromadb
-import requests
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from groq import Groq
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
+load_dotenv()  # reads GROQ_API_KEY from a local .env file
+
 DB_DIR = "chroma_db"
 COLLECTION_NAME = "tcs_knowledge"
-OLLAMA_MODEL = "llama3.2:3b"
-OLLAMA_URL = "http://localhost:11434/api/generate"
+GROQ_MODEL = "qwen/qwen3.6-27b"  # open-source model (Alibaba), confirmed available on this Groq account via /v1/models
 
 TOP_K = 3
 DISTANCE_THRESHOLD = 1.1
@@ -34,8 +41,8 @@ Do not make up information. Do not answer questions unrelated to TCS.
 
 app = FastAPI(title="TCS Chatbot API")
 
-# Allow a frontend running on a different port (e.g. React on :3000) to call this API.
-# For a public deployment, replace "*" with your actual frontend's domain.
+# Allow the frontend to call this API. For production, replace "*" with
+# your actual deployed frontend URL (e.g. "https://your-app.vercel.app").
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,11 +50,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load models once at startup, not per-request (this is the expensive part)
 print("Loading embedding model and ChromaDB...")
 embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 chroma_client = chromadb.PersistentClient(path=DB_DIR)
 collection = chroma_client.get_collection(COLLECTION_NAME)
+
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 print("Ready.")
 
 
@@ -79,23 +87,23 @@ QUESTION: {query}
 ANSWER:"""
 
 
-def call_ollama(prompt: str) -> str:
-    response = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": OLLAMA_MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "keep_alive": "30m",       # keep model loaded in RAM between requests
-            "options": {
-                "num_ctx": 2048,       # smaller context window = faster, less RAM
-                "num_predict": 200,    # cap response length so it can't ramble on
-            },
-        },
-        timeout=120,
+import re
+
+
+def call_groq(prompt: str) -> str:
+    response = groq_client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=200,
+        temperature=0.3,
+        reasoning_effort="none",  # Qwen is a reasoning model; this suppresses the <think> block
     )
-    response.raise_for_status()
-    return response.json()["response"]
+    raw_answer = response.choices[0].message.content
+
+    # Fallback safety net: strip any <think>...</think> block that slips through anyway,
+    # in case this Groq model/version ignores the reasoning_effort parameter.
+    cleaned = re.sub(r"<think>.*?</think>", "", raw_answer, flags=re.DOTALL).strip()
+    return cleaned
 
 
 @app.get("/")
@@ -114,6 +122,6 @@ def chat(request: ChatRequest):
         return ChatResponse(answer=REFUSAL_MESSAGE, sources=[], refused=True)
 
     prompt = build_prompt(query, chunks)
-    answer = call_ollama(prompt)
+    answer = call_groq(prompt)
 
     return ChatResponse(answer=answer, sources=sources, refused=False)
