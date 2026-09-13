@@ -53,7 +53,24 @@ app.add_middleware(
 print("Loading embedding model and ChromaDB...")
 embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 chroma_client = chromadb.PersistentClient(path=DB_DIR)
-collection = chroma_client.get_collection(COLLECTION_NAME)
+
+try:
+    collection = chroma_client.get_collection(COLLECTION_NAME)
+    print(f"Loaded existing collection with {collection.count()} chunks.")
+except Exception:
+    print("Collection not found — building it from chunks.json now...")
+    import json
+
+    with open("chunks.json", "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+
+    collection = chroma_client.get_or_create_collection(name=COLLECTION_NAME)
+    texts = [c["text"] for c in chunks]
+    ids = [c["id"] for c in chunks]
+    metadatas = [{"source": c["source"], "word_count": c["word_count"]} for c in chunks]
+    embeddings = embed_model.encode(texts).tolist()
+    collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+    print(f"Built collection with {collection.count()} chunks.")
 
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 print("Ready.")
